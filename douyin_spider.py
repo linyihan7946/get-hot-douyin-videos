@@ -138,27 +138,65 @@ async def get_hot_douyin_videos(keyword, max_videos=10):
 
             # 设置网络拦截，获取评论接口返回的内容
             async def handle_comment_response(response):
-                if "aweme/v1/web/comment/list/" in response.url:
+                if "comment" in response.url and "json" in response.headers.get(
+                    "content-type", ""
+                ):
                     try:
                         data = await response.json()
-                        for comment in data.get("comments", []):
-                            text = comment.get("text", "")
-                            if text and text not in comments_list:
-                                comments_list.append(text)
-                    except Exception as e:
+                        items = (
+                            data.get("comments")
+                            or data.get("data", {}).get("comments")
+                            or []
+                        )
+                        if isinstance(items, list):
+                            for item in items:
+                                text = item.get("text", "")
+                                if text and text not in comments_list:
+                                    comments_list.append(text)
+                    except:
                         pass
 
             page.on("response", handle_comment_response)
             await page.goto(video["url"])
             await page.wait_for_timeout(4000)
 
-            print("  正在滚动加载更多评论...")
-            for _ in range(3):
-                await page.mouse.wheel(0, 800)
-                await page.wait_for_timeout(2000)
+            print("  正在尝试触发评论加载...")
+            await page.wait_for_timeout(3000)
+
+            # 尝试定位评论区并进行滚动
+            # 抖音网页版评论区通常在右侧或下方，尝试在多个位置模拟滚动
+            print("  正在循环滚动加载更多评论（目标 500 条）...")
+            max_scrolls = 40
+            for i in range(max_scrolls):
+                # 尝试在不同位置滚动，并强制滚动所有可能的容器
+                await page.evaluate("""
+                    (() => {
+                        // 1. 滚动主窗口
+                        window.scrollBy(0, 1000);
+                        
+                        // 2. 尝试查找并滚动所有带有滚动条的容器（评论区通常是这种）
+                        const scrollables = document.querySelectorAll('div');
+                        scrollables.forEach(el => {
+                            const style = window.getComputedStyle(el);
+                            if (style.overflowY === 'auto' || style.overflowY === 'scroll') {
+                                el.scrollTop += 1000;
+                            }
+                        });
+                    })()
+                """)
+
+                await page.keyboard.press("PageDown")
+                await page.wait_for_timeout(1200)
+
+                if len(comments_list) >= 500:
+                    break
+
+                if (i + 1) % 10 == 0:
+                    print(f"    当前进度：{len(comments_list)} 条评论...")
 
             page.remove_listener("response", handle_comment_response)
-            video["comments"] = comments_list[:50]
+            video["comments"] = comments_list[:500]
+            print(f"  最终获取到 {len(video['comments'])} 条评论。")
             final_results.append(video)
 
         # 3. 合并数据并保存到同一个 JSON 文件

@@ -3,3 +3,4 @@ __pycache__/
 *.pyc
 .env
 user_data/
+*.json

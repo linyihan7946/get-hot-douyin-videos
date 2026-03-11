@@ -17,7 +17,7 @@ except ImportError:
     pass
 
 
-def simple_cluster_comments(comments, num_clusters=5):
+def simple_cluster_comments(comments, num_clusters=8):
     """
     对评论进行语义聚类，生成有意义的话题标签
     """
@@ -37,6 +37,7 @@ def simple_cluster_comments(comments, num_clusters=5):
         "省钱": "Token费用与成本问题",
         "价格": "Token费用与成本问题",
         "成本": "Token费用与成本问题",
+        "钱": "Token费用与成本问题",
         # 安全相关
         "木马": "安全隐患与隐私担忧",
         "病毒": "安全隐患与隐私担忧",
@@ -50,6 +51,7 @@ def simple_cluster_comments(comments, num_clusters=5):
         "工信部": "安全隐患与隐私担忧",
         "央视": "安全隐患与隐私担忧",
         "预警": "安全隐患与隐私担忧",
+        "监管": "安全隐患与隐私担忧",
         # 部署安装
         "安装": "部署安装与技术门槛",
         "部署": "部署安装与技术门槛",
@@ -60,6 +62,8 @@ def simple_cluster_comments(comments, num_clusters=5):
         "gateway": "部署安装与技术门槛",
         "终端": "部署安装与技术门槛",
         "代码": "部署安装与技术门槛",
+        "报错": "部署安装与技术门槛",
+        "教程": "部署安装与技术门槛",
         # 功能询问
         "能做": "功能与能力询问",
         "可以做": "功能与能力询问",
@@ -69,6 +73,8 @@ def simple_cluster_comments(comments, num_clusters=5):
         "能帮": "功能与能力询问",
         "炒股": "功能与能力询问",
         "赚钱": "功能与能力询问",
+        "能": "功能与能力询问",
+        "做": "功能与能力询问",
         # 使用门槛
         "听不懂": "学习使用门槛高",
         "看不懂": "学习使用门槛高",
@@ -77,33 +83,47 @@ def simple_cluster_comments(comments, num_clusters=5):
         "不懂": "学习使用门槛高",
         "学不会": "学习使用门槛高",
         "老年人": "学习使用门槛高",
+        "跟不上": "学习使用门槛高",
         # 硬件要求
         "电脑": "硬件设备要求",
-        "配置": "硬件设备要求",
+        "显卡": "硬件设备要求",
         "mac": "硬件设备要求",
         "苹果": "硬件设备要求",
         "树莓派": "硬件设备要求",
+        "内存": "硬件设备要求",
         # 商业模式
         "卖课": "商业模式与变现",
         "课程": "商业模式与变现",
         "培训": "商业模式与变现",
         "割韭菜": "商业模式与变现",
+        "智商税": "商业模式与变现",
         # 产品质疑
-        "智商税": "对产品价值的质疑",
         "没用": "对产品价值的质疑",
         "骗局": "对产品价值的质疑",
         "笑话": "对产品价值的质疑",
         "炒作": "对产品价值的质疑",
         "价值": "对产品价值的质疑",
+        "忽悠": "对产品价值的质疑",
         # 技术讨论
         "开源": "技术原理讨论",
         "架构": "技术原理讨论",
         "套壳": "技术原理讨论",
         "原理": "技术原理讨论",
+        "模型": "技术原理讨论",
+        "api": "技术原理讨论",
         # AI影响
         "取代": "AI取代人类的担忧",
         "失业": "AI取代人类的担忧",
         "未来": "AI取代人类的担忧",
+        "替代": "AI取代人类的担忧",
+        # 实际使用体验
+        "好用": "实际使用体验",
+        "难用": "实际使用体验",
+        "不错": "实际使用体验",
+        "厉害": "实际使用体验",
+        "试了": "实际使用体验",
+        "用了": "实际使用体验",
+        "体验": "实际使用体验",
     }
 
     # 分配评论到话题
@@ -127,73 +147,10 @@ def simple_cluster_comments(comments, num_clusters=5):
         else:
             clusters["其他讨论"].append(comment)
 
-    # 按评论数量排序，保留前num_clusters个
+    # 按评论数量排序
     sorted_clusters = dict(
         sorted(clusters.items(), key=lambda x: len(x[1]), reverse=True)
     )
-
-    # 如果"其他讨论"评论太多，尝试进一步细分
-    if (
-        "其他讨论" in sorted_clusters
-        and len(sorted_clusters["其他讨论"]) > len(comments) * 0.5
-    ):
-        other_comments = sorted_clusters.pop("其他讨论")
-        # 使用简单的关键词提取进行二次分类
-        stop_words = {
-            "的",
-            "了",
-            "在",
-            "是",
-            "我",
-            "你",
-            "他",
-            "们",
-            "这",
-            "那",
-            "就",
-            "也",
-            "都",
-            "和",
-            "与",
-            "或",
-            "但",
-            "而",
-            "又",
-            "还",
-            "都",
-            "很",
-            "太",
-            "真",
-            "好",
-            "吗",
-            "啊",
-            "呢",
-            "吧",
-            "呀",
-            "哦",
-            "嗯",
-        }
-        word_count = collections.Counter()
-        for c in other_comments:
-            for i in range(len(c) - 1):
-                word = c[i : i + 2]
-                if word not in stop_words and not any(w in word for w in stop_words):
-                    word_count[word] += 1
-
-        # 找出高频词作为话题
-        top_words = [w for w, c in word_count.most_common(3) if c >= 2]
-        for word in top_words:
-            sub_cluster = [c for c in other_comments if word in c]
-            if sub_cluster:
-                clusters[f"关于{word}的讨论"] = sub_cluster
-                other_comments = [c for c in other_comments if word not in c]
-
-        if other_comments:
-            clusters["其他讨论"] = other_comments
-
-        sorted_clusters = dict(
-            sorted(clusters.items(), key=lambda x: len(x[1]), reverse=True)
-        )
 
     return sorted_clusters
 
@@ -298,7 +255,7 @@ async def ai_cluster_comments(comments):
         return None
 
 
-async def fetch_video_comments(context, video, semaphore, target_comments=100):
+async def fetch_video_comments(context, video, semaphore, target_comments=200):
     async with semaphore:
         page = await context.new_page()
         print(f"  [并发] 正在抓取: {video['url']}")
@@ -306,50 +263,89 @@ async def fetch_video_comments(context, video, semaphore, target_comments=100):
         comments_list = []
 
         async def handle_comment_response(response):
-            if "comment" in response.url and "json" in response.headers.get(
-                "content-type", ""
-            ):
+            url = response.url.lower()
+            if "comment/list" in url or "aweme/comment" in url:
                 try:
-                    data = await response.json()
-                    items = (
-                        data.get("comments")
-                        or data.get("data", {}).get("comments")
-                        or []
-                    )
-                    if isinstance(items, list):
-                        for item in items:
-                            text = item.get("text", "")
-                            if text and text not in comments_list:
-                                comments_list.append(text)
+                    content_type = response.headers.get("content-type", "")
+                    if "json" in content_type:
+                        data = await response.json()
+                        items = data.get("comments", [])
+                        if isinstance(items, list):
+                            for item in items:
+                                text = item.get("text", "")
+                                if text and text not in comments_list:
+                                    comments_list.append(text)
                 except:
                     pass
 
         page.on("response", handle_comment_response)
         try:
-            # 增加超时容错
             await page.goto(video["url"], wait_until="domcontentloaded", timeout=60000)
             await page.wait_for_timeout(3000)
+
+            # 尝试滚动到评论区
+            try:
+                comment_section = await page.query_selector(
+                    '[class*="comment"], [data-e2e="comment"]'
+                )
+                if comment_section:
+                    await comment_section.scroll_into_view_if_needed()
+                    await page.wait_for_timeout(2000)
+            except:
+                pass
 
             last_count = 0
             no_change_count = 0
 
-            for i in range(50):  # 增加滚动次数以确保拿到100条
+            for i in range(300):  # 增加滚动次数
                 if i % 5 == 0:
                     await close_popups(page)
+
+                # 滚动页面
                 await page.evaluate("""
                     (() => {
-                        window.scrollBy(0, 1000);
-                        const scrollables = document.querySelectorAll('div');
-                        scrollables.forEach(el => {
-                            const style = window.getComputedStyle(el);
-                            if (style.overflowY === 'auto' || style.overflowY === 'scroll') {
-                                el.scrollTop += 1000;
-                            }
+                        window.scrollBy(0, 150);
+                        document.querySelectorAll('div').forEach(el => {
+                            try {
+                                const style = window.getComputedStyle(el);
+                                if (style.overflowY === 'auto' || style.overflowY === 'scroll') {
+                                    el.scrollTop += 150;
+                                }
+                            } catch(e) {}
                         });
                     })()
                 """)
-                await page.keyboard.press("PageDown")
-                await page.wait_for_timeout(800)
+                await page.wait_for_timeout(150)
+
+                # 每隔一段时间从DOM提取评论
+                if i % 8 == 0:
+                    try:
+                        dom_comments = await page.evaluate("""
+                            () => {
+                                const comments = [];
+                                const selectors = [
+                                    '[class*="comment-text"]',
+                                    '[class*="commentContent"]', 
+                                    '[class*="comment"] span',
+                                    '[data-e2e="comment"]'
+                                ];
+                                for (const selector of selectors) {
+                                    const elements = document.querySelectorAll(selector);
+                                    elements.forEach(el => {
+                                        const text = el.textContent.trim();
+                                        if (text && text.length > 5 && !comments.includes(text)) {
+                                            comments.push(text);
+                                        }
+                                    });
+                                }
+                                return comments;
+                            }
+                        """)
+                        for c in dom_comments:
+                            if c not in comments_list:
+                                comments_list.append(c)
+                    except:
+                        pass
 
                 current_count = len(comments_list)
                 if current_count >= target_comments:
@@ -360,7 +356,7 @@ async def fetch_video_comments(context, video, semaphore, target_comments=100):
                 else:
                     no_change_count = 0
 
-                if no_change_count >= 8:
+                if no_change_count >= 50:
                     break
                 last_count = current_count
 
@@ -474,7 +470,7 @@ async def get_hot_douyin_videos(
 
         semaphore = asyncio.Semaphore(concurrency)
         tasks = [
-            fetch_video_comments(context, video, semaphore, target_comments=100)
+            fetch_video_comments(context, video, semaphore, target_comments=200)
             for video in top_videos
         ]
         await asyncio.gather(*tasks)

@@ -7,6 +7,7 @@ import sys
 import collections
 import math
 import jieba
+from datetime import datetime, timedelta
 from playwright.async_api import async_playwright
 
 try:
@@ -27,27 +28,27 @@ def is_valid_comment(text):
     text = text.strip()
 
     # 过滤展开回复相关
-    if re.match(r'^展开\s*\d*\s*条回复?$', text):
+    if re.match(r"^展开\s*\d*\s*条回复?$", text):
         return False
 
     # 过滤时间地点标记 (如: "1天前·北京", "2小时前·广东", "3分钟前·上海")
-    if re.match(r'^\d+\s*(秒|分钟|小时|天|周|月|年)前[·\s]?[\u4e00-\u9fa5]*$', text):
+    if re.match(r"^\d+\s*(秒|分钟|小时|天|周|月|年)前[·\s]?[\u4e00-\u9fa5]*$", text):
         return False
 
     # 过滤纯数字或纯符号
-    if re.match(r'^[\d\s\-\+\*\/\.\,]+$', text):
+    if re.match(r"^[\d\s\-\+\*\/\.\,]+$", text):
         return False
 
     # 过滤只包含英文和数字的短文本（可能是用户ID）
-    if len(text) < 8 and re.match(r'^[a-zA-Z0-9_\-\s]+$', text):
+    if len(text) < 8 and re.match(r"^[a-zA-Z0-9_\-\s]+$", text):
         return False
 
     # 过滤"X小时前·地点"这种格式的变体
-    if re.match(r'^\d+小时前', text) and '·' in text:
+    if re.match(r"^\d+小时前", text) and "·" in text:
         return False
 
     # 过滤"展开X条"格式
-    if re.match(r'^展开\d+条', text):
+    if re.match(r"^展开\d+条", text):
         return False
 
     return True
@@ -434,7 +435,13 @@ async def fetch_video_comments(context, video, semaphore, target_comments=100):
 
 
 async def get_hot_douyin_videos(
-    keyword, max_videos=10, headless=False, concurrency=3, skip_cluster=False
+    keyword,
+    max_videos=10,
+    headless=False,
+    concurrency=3,
+    skip_cluster=False,
+    start_date=None,
+    end_date=None,
 ):
     async with async_playwright() as p:
         user_data_path = os.path.join(os.getcwd(), "user_data")
@@ -483,6 +490,7 @@ async def get_hot_douyin_videos(
                             if not vid:
                                 continue
                             stats = aweme.get("statistics", {})
+                            create_time = aweme.get("create_time", 0)
                             videos_data[vid] = {
                                 "video_id": vid,
                                 "url": f"https://www.douyin.com/video/{vid}",
@@ -490,6 +498,12 @@ async def get_hot_douyin_videos(
                                 "likes": stats.get("digg_count", 0),
                                 "shares": stats.get("share_count", 0),
                                 "comments_count": stats.get("comment_count", 0),
+                                "create_time": create_time,
+                                "create_time_str": datetime.fromtimestamp(
+                                    create_time
+                                ).strftime("%Y-%m-%d %H:%M:%S")
+                                if create_time
+                                else "未知",
                                 "comments": [],
                             }
                 except:
@@ -524,13 +538,45 @@ async def get_hot_douyin_videos(
             await context.close()
             return
 
+        time_filter_info = ""
+        if start_date or end_date:
+            start_ts = (
+                datetime.strptime(start_date, "%Y-%m-%d").timestamp()
+                if start_date
+                else 0
+            )
+            end_ts = (
+                datetime.strptime(end_date, "%Y-%m-%d").timestamp() + 86400
+                if end_date
+                else datetime.now().timestamp()
+            )
+
+            filtered_videos = {
+                vid: v
+                for vid, v in videos_data.items()
+                if v.get("create_time", 0) >= start_ts
+                and v.get("create_time", 0) <= end_ts
+            }
+            print(
+                f"-> 时间范围过滤: {len(videos_data)} -> {len(filtered_videos)} 个视频"
+            )
+            time_filter_info = (
+                f" (时间范围: {start_date or '不限'} ~ {end_date or '不限'})"
+            )
+            videos_data = filtered_videos
+
+        if not videos_data:
+            print("-> [警告] 指定时间范围内未找到视频。")
+            await context.close()
+            return
+
         sorted_videos = sorted(
             videos_data.values(), key=lambda x: x["likes"], reverse=True
         )
         top_videos = sorted_videos[:max_videos]
 
         print(
-            f"\n-> 选取点赞前 {len(top_videos)} 个视频，开始并发抓取评论 (并发数: {concurrency})..."
+            f"\n-> 选取点赞前 {len(top_videos)} 个视频{time_filter_info}，开始并发抓取评论 (并发数: {concurrency})..."
         )
 
         semaphore = asyncio.Semaphore(concurrency)
@@ -554,7 +600,11 @@ async def get_hot_douyin_videos(
                         print(f"  - {cluster} ({len(items)}条): {clean_sample}...")
 
         # 4. 保存结果
-        output_data = {"keyword": keyword, "videos": top_videos}
+        output_data = {
+            "keyword": keyword,
+            "time_range": {"start_date": start_date, "end_date": end_date},
+            "videos": top_videos,
+        }
         output_file = f"douyin_result_{keyword}.json"
         with open(output_file, "w", encoding="utf-8") as f:
             json.dump(output_data, f, ensure_ascii=False, indent=4)
@@ -565,17 +615,39 @@ async def get_hot_douyin_videos(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="抖音热门视频与评论抓取聚类工具")
-    parser.add_argument("-k", "--keyword", type=str, required=True, help="关键词")
-    parser.add_argument("-m", "--max", type=int, default=10, help="最大视频数量")
-    parser.add_argument("--headless", action="store_true", help="无头模式")
-    parser.add_argument("-c", "--concurrency", type=int, default=3, help="并发数")
     parser.add_argument(
-        "--no-cluster", action="store_true", help="跳过聚类（可用大模型手动分析）"
+        "-k", "--keyword", type=str, required=True, help="搜索关键词（必填）"
+    )
+    parser.add_argument(
+        "-m", "--max", type=int, default=10, help="最大视频数量（默认: 10）"
+    )
+    parser.add_argument("--headless", action="store_true", help="无头模式运行")
+    parser.add_argument(
+        "-c", "--concurrency", type=int, default=3, help="并发抓取数（默认: 3）"
+    )
+    parser.add_argument("--no-cluster", action="store_true", help="跳过评论聚类分析")
+    parser.add_argument(
+        "--start-date",
+        type=str,
+        default=None,
+        help="开始日期，格式 YYYY-MM-DD（默认: 不限）",
+    )
+    parser.add_argument(
+        "--end-date",
+        type=str,
+        default=None,
+        help="结束日期，格式 YYYY-MM-DD（默认: 不限）",
     )
 
     args = parser.parse_args()
     asyncio.run(
         get_hot_douyin_videos(
-            args.keyword, args.max, args.headless, args.concurrency, args.no_cluster
+            args.keyword,
+            args.max,
+            args.headless,
+            args.concurrency,
+            args.no_cluster,
+            args.start_date,
+            args.end_date,
         )
     )

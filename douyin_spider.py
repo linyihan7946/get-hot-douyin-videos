@@ -17,6 +17,66 @@ except ImportError:
     pass
 
 
+def is_valid_comment(text):
+    """
+    过滤无效的评论内容（UI元素、时间地点标记等）
+    """
+    if not text or len(text.strip()) < 5:
+        return False
+
+    text = text.strip()
+
+    # 过滤展开回复相关
+    if re.match(r'^展开\s*\d*\s*条回复?$', text):
+        return False
+
+    # 过滤时间地点标记 (如: "1天前·北京", "2小时前·广东", "3分钟前·上海")
+    if re.match(r'^\d+\s*(秒|分钟|小时|天|周|月|年)前[·\s]?[\u4e00-\u9fa5]*$', text):
+        return False
+
+    # 过滤纯数字或纯符号
+    if re.match(r'^[\d\s\-\+\*\/\.\,]+$', text):
+        return False
+
+    # 过滤只包含英文和数字的短文本（可能是用户ID）
+    if len(text) < 8 and re.match(r'^[a-zA-Z0-9_\-\s]+$', text):
+        return False
+
+    # 过滤"X小时前·地点"这种格式的变体
+    if re.match(r'^\d+小时前', text) and '·' in text:
+        return False
+
+    # 过滤"展开X条"格式
+    if re.match(r'^展开\d+条', text):
+        return False
+
+    return True
+
+
+def filter_comments(comments, target_count=100):
+    """
+    过滤评论并返回指定数量的有效评论
+    """
+    valid_comments = []
+    seen = set()
+
+    for comment in comments:
+        # 去重
+        if comment in seen:
+            continue
+        seen.add(comment)
+
+        # 验证有效性
+        if is_valid_comment(comment):
+            valid_comments.append(comment)
+
+        # 达到目标数量就停止
+        if len(valid_comments) >= target_count:
+            break
+
+    return valid_comments
+
+
 def simple_cluster_comments(comments, num_clusters=8):
     """
     对评论进行语义聚类，生成有意义的话题标签
@@ -255,12 +315,13 @@ async def ai_cluster_comments(comments):
         return None
 
 
-async def fetch_video_comments(context, video, semaphore, target_comments=200):
+async def fetch_video_comments(context, video, semaphore, target_comments=100):
     async with semaphore:
         page = await context.new_page()
         print(f"  [并发] 正在抓取: {video['url']}")
 
         comments_list = []
+        raw_comments = []  # 存储原始评论用于过滤
 
         async def handle_comment_response(response):
             url = response.url.lower()
@@ -273,8 +334,8 @@ async def fetch_video_comments(context, video, semaphore, target_comments=200):
                         if isinstance(items, list):
                             for item in items:
                                 text = item.get("text", "")
-                                if text and text not in comments_list:
-                                    comments_list.append(text)
+                                if text and text not in raw_comments:
+                                    raw_comments.append(text)
                 except:
                     pass
 
@@ -297,11 +358,11 @@ async def fetch_video_comments(context, video, semaphore, target_comments=200):
             last_count = 0
             no_change_count = 0
 
-            for i in range(300):  # 增加滚动次数
+            for i in range(400):  # 滚动次数
                 if i % 5 == 0:
                     await close_popups(page)
 
-                # 滚动页面
+                # 滚动页面和评论区
                 await page.evaluate("""
                     (() => {
                         window.scrollBy(0, 150);
@@ -309,23 +370,24 @@ async def fetch_video_comments(context, video, semaphore, target_comments=200):
                             try {
                                 const style = window.getComputedStyle(el);
                                 if (style.overflowY === 'auto' || style.overflowY === 'scroll') {
-                                    el.scrollTop += 150;
+                                    el.scrollTop += 200;
                                 }
                             } catch(e) {}
                         });
                     })()
                 """)
-                await page.wait_for_timeout(150)
+                await page.wait_for_timeout(100)
 
                 # 每隔一段时间从DOM提取评论
-                if i % 8 == 0:
+                if i % 4 == 0:
                     try:
                         dom_comments = await page.evaluate("""
                             () => {
                                 const comments = [];
                                 const selectors = [
                                     '[class*="comment-text"]',
-                                    '[class*="commentContent"]', 
+                                    '[class*="commentText"]',
+                                    '[class*="commentContent"]',
                                     '[class*="comment"] span',
                                     '[data-e2e="comment"]'
                                 ];
@@ -342,23 +404,26 @@ async def fetch_video_comments(context, video, semaphore, target_comments=200):
                             }
                         """)
                         for c in dom_comments:
-                            if c not in comments_list:
-                                comments_list.append(c)
+                            if c not in raw_comments:
+                                raw_comments.append(c)
                     except:
                         pass
 
-                current_count = len(comments_list)
-                if current_count >= target_comments:
+                # 过滤并统计有效评论数
+                comments_list = filter_comments(raw_comments, target_comments)
+
+                # 当有效评论达到目标时停止
+                if len(comments_list) >= target_comments:
                     break
 
-                if current_count == last_count:
+                if len(raw_comments) == last_count:
                     no_change_count += 1
                 else:
                     no_change_count = 0
 
-                if no_change_count >= 50:
+                if no_change_count >= 80:  # 增加无变化阈值
                     break
-                last_count = current_count
+                last_count = len(raw_comments)
 
             video["comments"] = comments_list[:target_comments]
             print(f"  [完成] {video['url']} | 抓取到 {len(video['comments'])} 条评论")
@@ -470,7 +535,7 @@ async def get_hot_douyin_videos(
 
         semaphore = asyncio.Semaphore(concurrency)
         tasks = [
-            fetch_video_comments(context, video, semaphore, target_comments=200)
+            fetch_video_comments(context, video, semaphore, target_comments=100)
             for video in top_videos
         ]
         await asyncio.gather(*tasks)

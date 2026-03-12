@@ -1,6 +1,7 @@
 .ruff_cache/
 __pycache__/
 *.pyc
+*.txt
+*.json
 .env
 user_data/
-*.json

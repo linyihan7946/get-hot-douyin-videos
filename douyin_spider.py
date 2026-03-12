@@ -609,7 +609,39 @@ async def get_hot_douyin_videos(
         with open(output_file, "w", encoding="utf-8") as f:
             json.dump(output_data, f, ensure_ascii=False, indent=4)
 
-        print(f"\n-> 任务完成！结果已保存到 {output_file}")
+        # 5. 保存文本格式结果
+        txt_file = f"douyin_result_{keyword}.txt"
+        with open(txt_file, "w", encoding="utf-8") as f:
+            f.write(f"关键词: {keyword}\n")
+            if start_date or end_date:
+                f.write(f"时间范围: {start_date or '不限'} ~ {end_date or '不限'}\n")
+            f.write(f"视频数量: {len(top_videos)}\n")
+            f.write("=" * 60 + "\n\n")
+
+            for i, video in enumerate(top_videos, 1):
+                f.write(f"【视频 {i}】\n")
+                f.write(f"视频描述: {video.get('description', '无描述')}\n")
+                f.write(f"视频链接: {video.get('url', '无')}\n")
+                f.write(f"点赞数: {video.get('likes', 0)}\n")
+                f.write(f"分享数: {video.get('shares', 0)}\n")
+                f.write(f"评论数: {video.get('comments_count', 0)}\n")
+                if video.get("create_time_str"):
+                    f.write(f"发布时间: {video.get('create_time_str')}\n")
+
+                if video.get("comment_clusters"):
+                    f.write("\n评论聚类:\n")
+                    for cluster, items in video["comment_clusters"].items():
+                        f.write(f"  [{cluster}] ({len(items)}条)\n")
+                        for item in items[:3]:
+                            clean_item = re.sub(r"[^\x20-\x7E\u4E00-\u9FFF]", "", item)[
+                                :60
+                            ]
+                            f.write(f"    - {clean_item}\n")
+                        if len(items) > 3:
+                            f.write(f"    ... 共 {len(items)} 条\n")
+                f.write("\n" + "-" * 60 + "\n\n")
+
+        print(f"\n-> 任务完成！结果已保存到 {output_file} 和 {txt_file}")
         await context.close()
 
 
